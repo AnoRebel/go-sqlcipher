@@ -1,0 +1,28 @@
+version: "2"
+
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # These are cleanup/teardown calls where errors are intentionally ignored
+      exclude-functions:
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.Tx).Rollback
+        - (*os.File).Close
+        - os.Remove
+        - (io.Closer).Close
+        - (*github.com/AnoRebel/go-sqlcipher.SQLiteStmt).Close
+        - (*github.com/AnoRebel/go-sqlcipher.SQLiteConn).Close
+        - (*github.com/AnoRebel/go-sqlcipher.SQLiteConn).exec
+
+formatters:
+  enable:
+    - gofmt
+
+issues:
+  exclude-dirs:
+    - _example
+    - upgrade
+    - util
