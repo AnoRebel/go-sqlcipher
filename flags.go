@@ -7,7 +7,15 @@ package sqlite3
 // enable encryption codec in sqlite
 #cgo CFLAGS: -DSQLITE_HAS_CODEC
 
-// use memory for temporay storage in sqlite
+// SQLCipher 4.7.0 Breaking Change
+// Requires defining
+//   `SQLITE_EXTRA_INIT=sqlcipher_extra_init` and
+//   `SQLITE_EXTRA_SHUTDOWN=sqlcipher_extra_shutdown`
+// at compile time for optimized library initialization and cleanup
+#cgo CFLAGS: -DSQLITE_EXTRA_INIT=sqlcipher_extra_init
+#cgo CFLAGS: -DSQLITE_EXTRA_SHUTDOWN=sqlcipher_extra_shutdown
+
+// use memory for temporary storage in sqlite
 #cgo CFLAGS: -DSQLITE_TEMP_STORE=2
 
 // use libtomcrypt implementation in sqlcipher
@@ -18,6 +26,9 @@ package sqlite3
 
 // disable assertions
 #cgo CFLAGS: -DNDEBUG
+
+// ensure stdint.h is included for uint64_t etc.
+#cgo CFLAGS: -DHAVE_STDINT_H
 
 // set operating specific sqlite flags
 #cgo linux CFLAGS: -DSQLITE_OS_UNIX=1

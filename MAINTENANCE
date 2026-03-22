@@ -1,7 +1,7 @@
 To maintain this code properly, the following three repositories have to be
 tracked for changes (maintenance details below):
 
-- https://github.com/mattn/go-sqlite
+- https://github.com/mattn/go-sqlite3
 - https://github.com/sqlcipher/sqlcipher
 - https://github.com/libtom/libtomcrypt
 
@@ -9,29 +9,53 @@ tracked for changes (maintenance details below):
 Update code from https://github.com/mattn/go-sqlite3
 ----------------------------------------------------
 
-Current release: v1.14.5
+Current release: v1.14.34
 
-Use ./track_go-sqlite3.sh
+1. git clone mattn/go-sqlite3 new version to temp dir
+2. Use ./track_go-sqlite3.sh <mattn/go-sqlite3 dir>
+3. find & sed mattn/go-sqlite3 to AnoRebel/go-sqlcipher
+4. rewrite pragma args golang code to sqlite3.go
+   - _pragma_key (MUST execute before all other PRAGMAs)
+   - _pragma_cipher_page_size
+   - _pragma_cipher_compatibility
+5. Add #include <stdint.h> to the C includes in sqlite3.go
 
 
 Update code from https://github.com/sqlcipher/sqlcipher
 -------------------------------------------------------
 
-Current release: v4.4.2
+Current release: v4.14.0
+
+Note:
+v4.14.0 restored LibTomCrypt support (it was removed in v4.12.0).
+If a future version removes it again, revert the corresponding commit
+(see https://github.com/sqlcipher/sqlcipher/issues/564).
 
 Execute:
-./configure
-make
-
-Track files:
-sqlite3.h
-sqlite3.c
+1. git clone sqlcipher to temp dir
+2. git checkout v4.14.0
+3. ./configure --with-tempstore=yes \
+     CFLAGS="-DSQLITE_HAS_CODEC \
+             -DSQLITE_EXTRA_INIT=sqlcipher_extra_init \
+             -DSQLITE_EXTRA_SHUTDOWN=sqlcipher_extra_shutdown \
+             -DSQLCIPHER_CRYPTO_LIBTOMCRYPT"
+4. make sqlite3.c
+5. Copy sqlite3.c and sqlite3.h
+6. Fix const qualifier warnings in sqlite3.c:
+   - strrchr() and strchr() return const char* when given const char*,
+     add explicit (char*) cast where assigned to non-const
 
 
 Update code from https://github.com/libtom/libtomcrypt
 ------------------------------------------------------
 
-Current HEAD: cfbd7f8d364e1438555ff2a247f7e17add11840e
-(from develop branch, 2020-08-29)
+Current HEAD: 63af5f6dc15a686ff2099676e0fd02550ec87659
+(from develop branch, 2026-02-04)
 
-Use ./track_libtomcrypt.sh
+Note: libtomcrypt has governance issues — the last official release was
+many years ago and all development happens on the develop branch.
+
+Use ./track_libtomcrypt.sh <libtomcrypt dir>
+
+After running the script:
+- Make sure aes.c includes aes_tab.h instead of aes_tab.c

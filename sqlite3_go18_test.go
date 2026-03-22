@@ -3,6 +3,7 @@
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
+//go:build go1.8 && cgo
 // +build go1.8,cgo
 
 package sqlite3
@@ -11,7 +12,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"sync"
@@ -402,7 +402,7 @@ func TestFileCopyTruncate(t *testing.T) {
 
 	// copy db to new file
 	var data []byte
-	data, err = ioutil.ReadFile(tempFilename)
+	data, err = os.ReadFile(tempFilename)
 	if err != nil {
 		t.Fatal("read file error:", err)
 	}

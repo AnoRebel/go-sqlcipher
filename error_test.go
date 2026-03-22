@@ -3,13 +3,13 @@
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
+//go:build cgo
 // +build cgo
 
 package sqlite3
 
 import (
 	"database/sql"
-	"io/ioutil"
 	"os"
 	"path"
 	"testing"
@@ -23,11 +23,7 @@ func TestSimpleError(t *testing.T) {
 }
 
 func TestCorruptDbErrors(t *testing.T) {
-	dirName, err := ioutil.TempDir("", "sqlite3")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dirName)
+	dirName := t.TempDir()
 
 	dbFileName := path.Join(dirName, "test.db")
 	f, err := os.Create(dbFileName)
@@ -42,7 +38,10 @@ func TestCorruptDbErrors(t *testing.T) {
 		_, err = db.Exec("drop table foo")
 	}
 
-	sqliteErr := err.(Error)
+	sqliteErr, ok := err.(Error)
+	if !ok {
+		t.Fatal(err)
+	}
 	if sqliteErr.Code != ErrNotADB {
 		t.Error("wrong error code for corrupted DB")
 	}
@@ -53,11 +52,7 @@ func TestCorruptDbErrors(t *testing.T) {
 }
 
 func TestSqlLogicErrors(t *testing.T) {
-	dirName, err := ioutil.TempDir("", "sqlite3")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dirName)
+	dirName := t.TempDir()
 
 	dbFileName := path.Join(dirName, "test.db")
 	db, err := sql.Open("sqlite3", dbFileName)
@@ -80,11 +75,7 @@ func TestSqlLogicErrors(t *testing.T) {
 }
 
 func TestExtendedErrorCodes_ForeignKey(t *testing.T) {
-	dirName, err := ioutil.TempDir("", "sqlite3-err")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dirName)
+	dirName := t.TempDir()
 
 	dbFileName := path.Join(dirName, "test.db")
 	db, err := sql.Open("sqlite3", dbFileName)
@@ -126,11 +117,7 @@ func TestExtendedErrorCodes_ForeignKey(t *testing.T) {
 }
 
 func TestExtendedErrorCodes_NotNull(t *testing.T) {
-	dirName, err := ioutil.TempDir("", "sqlite3-err")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dirName)
+	dirName := t.TempDir()
 
 	dbFileName := path.Join(dirName, "test.db")
 	db, err := sql.Open("sqlite3", dbFileName)
@@ -182,11 +169,7 @@ func TestExtendedErrorCodes_NotNull(t *testing.T) {
 }
 
 func TestExtendedErrorCodes_Unique(t *testing.T) {
-	dirName, err := ioutil.TempDir("", "sqlite3-err")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dirName)
+	dirName := t.TempDir()
 
 	dbFileName := path.Join(dirName, "test.db")
 	db, err := sql.Open("sqlite3", dbFileName)

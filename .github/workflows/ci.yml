@@ -1,23 +1,73 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
 
 jobs:
-  build:
+  test:
     strategy:
+      fail-fast: false
       matrix:
-        go-version: [1.13.x, 1.14.x, 1.15.x]
-        platform: [ubuntu-latest]
-    runs-on: ${{ matrix.platform }}
+        go-version: ['1.24', '1.25', '1.26']
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-    - name: Install Go
-      uses: actions/setup-go@v2
+    - uses: actions/checkout@v6
+    - uses: actions/setup-go@v6
       with:
         go-version: ${{ matrix.go-version }}
-    - name: Checkout code
-      uses: actions/checkout@v2
+    - name: Build
+      run: go build -v ./...
     - name: Test
-      run: |
-        go get github.com/frankbraun/gocheck
-        export PATH=$GOPATH/bin:$PATH
-        make test
+      run: go test -v -race -count=1 -timeout 10m ./...
+    - name: Vet
+      run: go vet ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-go@v6
+      with:
+        go-version: '1.26'
+    - uses: golangci/golangci-lint-action@v6
+      with:
+        version: latest
+
+  test-build-tags:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tags:
+          - "sqlite_fts5"
+          - "sqlite_json1"
+          - "sqlite_vtable"
+          - "sqlite_math_functions"
+          - "sqlite_column_metadata"
+          - "sqlite_unlock_notify"
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-go@v6
+      with:
+        go-version: '1.26'
+    - name: Build with tag ${{ matrix.tags }}
+      run: go build -v -tags "${{ matrix.tags }}" ./...
+    - name: Test with tag ${{ matrix.tags }}
+      run: go test -v -race -count=1 -tags "${{ matrix.tags }}" -timeout 10m ./...
+
+  cross-compile:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-go@v6
+      with:
+        go-version: '1.26'
+    - name: Install cross-compiler
+      run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+    - name: Build linux/amd64
+      run: go build -v ./...
+    - name: Build linux/arm64
+      run: GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc go build ./...
