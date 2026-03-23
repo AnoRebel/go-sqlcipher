@@ -6,6 +6,7 @@ linters:
     errcheck:
       # These are cleanup/teardown calls where errors are intentionally ignored
       exclude-functions:
+        - io/ioutil.ReadFile
         - (*database/sql.DB).Close
         - (*database/sql.Rows).Close
         - (*database/sql.Stmt).Close
@@ -16,13 +17,12 @@ linters:
         - (*github.com/AnoRebel/go-sqlcipher.SQLiteStmt).Close
         - (*github.com/AnoRebel/go-sqlcipher.SQLiteConn).Close
         - (*github.com/AnoRebel/go-sqlcipher.SQLiteConn).exec
+  exclusions:
+    paths:
+      - _example
+      - upgrade
+      - util
 
 formatters:
   enable:
     - gofmt
-
-issues:
-  exclude-dirs:
-    - _example
-    - upgrade
-    - util
