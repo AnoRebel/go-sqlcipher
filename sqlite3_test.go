@@ -321,7 +321,7 @@ func TestClose(t *testing.T) {
 		t.Fatal("Failed to open database:", err)
 	}
 
-	_, err = db.Exec("drop table foo")
+	_, _ = db.Exec("drop table foo")
 	_, err = db.Exec("create table foo (id integer)")
 	if err != nil {
 		t.Fatal("Failed to create table:", err)
@@ -348,7 +348,7 @@ func TestInsert(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("drop table foo")
+	_, _ = db.Exec("drop table foo")
 	_, err = db.Exec("create table foo (id integer)")
 	if err != nil {
 		t.Fatal("Failed to create table:", err)
@@ -391,7 +391,7 @@ func TestUpsert(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("drop table foo")
+	_, _ = db.Exec("drop table foo")
 	_, err = db.Exec("create table foo (name string primary key, counter integer)")
 	if err != nil {
 		t.Fatal("Failed to create table:", err)
@@ -436,7 +436,7 @@ func TestUpdate(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("drop table foo")
+	_, _ = db.Exec("drop table foo")
 	_, err = db.Exec("create table foo (id integer)")
 	if err != nil {
 		t.Fatal("Failed to create table:", err)
@@ -501,7 +501,7 @@ func TestDelete(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("drop table foo")
+	_, _ = db.Exec("drop table foo")
 	_, err = db.Exec("create table foo (id integer)")
 	if err != nil {
 		t.Fatal("Failed to create table:", err)
@@ -562,7 +562,7 @@ func TestBooleanRoundtrip(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("DROP TABLE foo")
+	_, _ = db.Exec("DROP TABLE foo")
 	_, err = db.Exec("CREATE TABLE foo(id INTEGER, value BOOL)")
 	if err != nil {
 		t.Fatal("Failed to create table:", err)
@@ -613,7 +613,7 @@ func TestTimestamp(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("DROP TABLE foo")
+	_, _ = db.Exec("DROP TABLE foo")
 	_, err = db.Exec("CREATE TABLE foo(id INTEGER, ts timeSTAMP, dt DATETIME)")
 	if err != nil {
 		t.Fatal("Failed to create table:", err)
@@ -919,7 +919,7 @@ func TestTransaction(t *testing.T) {
 		t.Fatal("Failed to commit transaction:", err)
 	}
 
-	rows, err = tx.Query("SELECT id from foo")
+	_, err = tx.Query("SELECT id from foo")
 	if err == nil {
 		t.Fatal("Expected failure to query")
 	}
@@ -982,7 +982,7 @@ func TestTimezoneConversion(t *testing.T) {
 		}
 		defer db.Close()
 
-		_, err = db.Exec("DROP TABLE foo")
+		_, _ = db.Exec("DROP TABLE foo")
 		_, err = db.Exec("CREATE TABLE foo(id INTEGER, ts TIMESTAMP, dt DATETIME)")
 		if err != nil {
 			t.Fatal("Failed to create table:", err)
@@ -1304,7 +1304,7 @@ func (t TimeStamp) Scan(value any) error {
 }
 
 func (t TimeStamp) Value() (driver.Value, error) {
-	return t.Time.Format(CurrentTimeStamp), nil
+	return t.Format(CurrentTimeStamp), nil
 }
 
 func TestDateTimeNow(t *testing.T) {
@@ -1992,7 +1992,7 @@ func TestNamedParam(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("drop table foo")
+	_, _ = db.Exec("drop table foo")
 	_, err = db.Exec("create table foo (id integer, name text, amount integer)")
 	if err != nil {
 		t.Fatal("Failed to create table:", err)
@@ -2105,7 +2105,7 @@ func initializeTestDB(t testing.TB) {
 }
 
 func freeTestDB() {
-	err := db.DB.Close()
+	err := db.Close()
 	if err != nil {
 		panic(err)
 	}
@@ -2194,18 +2194,6 @@ func (db *TestDB) serialPK() string {
 		return "serial primary key"
 	case MYSQL:
 		return "integer primary key auto_increment"
-	}
-	panic("unknown dialect")
-}
-
-func (db *TestDB) now() string {
-	switch db.dialect {
-	case SQLITE:
-		return "datetime('now')"
-	case POSTGRESQL:
-		return "now()"
-	case MYSQL:
-		return "now()"
 	}
 	panic("unknown dialect")
 }

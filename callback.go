@@ -172,10 +172,7 @@ func callbackArgBool(v *C.sqlite3_value) (reflect.Value, error) {
 		return reflect.Value{}, fmt.Errorf("argument must be an INTEGER")
 	}
 	i := int64(C.sqlite3_value_int64(v))
-	val := false
-	if i != 0 {
-		val = true
-	}
+	val := i != 0
 	return reflect.ValueOf(val), nil
 }
 

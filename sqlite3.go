@@ -512,7 +512,7 @@ func (tx *SQLiteTx) Commit() error {
 		// return from Commit() - we must clean up to honour its semantics.
 		// We don't know if the ROLLBACK is strictly necessary, but according
 		// to sqlite's docs, there is no harm in calling ROLLBACK unnecessarily.
-		tx.c.exec(context.Background(), "ROLLBACK", nil)
+		tx.c.exec(context.Background(), "ROLLBACK", nil) //nolint:errcheck // best-effort cleanup
 	}
 	return err
 }
@@ -625,13 +625,13 @@ func (c *SQLiteConn) RegisterFunc(name string, impl any, pure bool) error {
 	fi.f = reflect.ValueOf(impl)
 	t := fi.f.Type()
 	if t.Kind() != reflect.Func {
-		return errors.New("Non-function passed to RegisterFunc")
+		return errors.New("non-function passed to RegisterFunc")
 	}
 	if t.NumOut() != 1 && t.NumOut() != 2 {
 		return errors.New("SQLite functions must return 1 or 2 values")
 	}
 	if t.NumOut() == 2 && !t.Out(1).Implements(reflect.TypeOf((*error)(nil)).Elem()) {
-		return errors.New("Second return value of SQLite function must be error")
+		return errors.New("second return value of SQLite function must be error")
 	}
 
 	numArgs := t.NumIn()
@@ -713,7 +713,7 @@ func (c *SQLiteConn) RegisterAggregator(name string, impl any, pure bool) error 
 		return errors.New("SQLite aggregator constructors must return 1 or 2 values")
 	}
 	if t.NumOut() == 2 && !t.Out(1).Implements(reflect.TypeOf((*error)(nil)).Elem()) {
-		return errors.New("Second return value of SQLite function must be error")
+		return errors.New("second return value of SQLite function must be error")
 	}
 	if t.NumIn() != 0 {
 		return errors.New("SQLite aggregator constructors must not have arguments")

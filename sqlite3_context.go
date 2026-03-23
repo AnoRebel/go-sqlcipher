@@ -28,7 +28,6 @@ import "C"
 
 import (
 	"math"
-	"reflect"
 	"unsafe"
 )
 
@@ -91,8 +90,8 @@ func (c *SQLiteContext) ResultNull() {
 // ResultText sets the result of an SQL function.
 // See: sqlite3_result_text, http://sqlite.org/c3ref/result_blob.html
 func (c *SQLiteContext) ResultText(s string) {
-	h := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	cs, l := (*C.char)(unsafe.Pointer(h.Data)), C.int(h.Len)
+	cs := (*C.char)(unsafe.Pointer(unsafe.StringData(s)))
+	l := C.int(len(s))
 	C.my_result_text((*C.sqlite3_context)(c), cs, l)
 }
 
