@@ -7,10 +7,10 @@
 Self-contained Go sqlite3 driver with an AES-256 encrypted sqlite3 database
 conforming to the built-in database/sql interface. It is based on:
 
-- Go sqlite3 driver: https://github.com/mattn/go-sqlite3 (v1.14.34)
-- SQLite extension with AES-256 codec: https://github.com/sqlcipher/sqlcipher (v4.14.0, SQLite 3.51.3)
+- Go sqlite3 driver: https://github.com/mattn/go-sqlite3 (v1.14.53)
+- SQLite extension with AES-256 codec: https://github.com/sqlcipher/sqlcipher (v4.20.0, SQLite 3.54.1)
 - AES-256 implementation from: https://github.com/libtom/libtomcrypt
-- Hardware-accelerated AES from mbedTLS (AES-NI on x86_64, ARM Crypto Extensions on arm64)
+- ARMv8 AES derived from https://github.com/Mbed-TLS/mbedtls (3.6.7)
 
 SQLite itself is part of SQLCipher.
 
@@ -18,6 +18,22 @@ SQLite itself is part of SQLCipher.
 
 - Go 1.26+
 - C compiler (gcc or clang) for CGo
+
+### Hardware acceleration
+
+The crypto implementation is chosen at runtime, with a portable C fallback:
+
+| CPU | AES | SHA |
+|---|---|---|
+| x86 / x86_64 | AES-NI | SHA-1/SHA-256 extensions; SHA-512 extension with GCC 14+ / clang 17+ on CPUs that have it |
+| arm64 (Linux, Android, macOS) | ARMv8 Crypto Extensions | portable C |
+| other | portable C | portable C |
+
+Build with `CGO_CFLAGS="-O2 -g -DLTC_NO_ACCEL"` to force the portable C
+implementations. SQLCipher 4 uses HMAC-SHA512 per page and
+PBKDF2-HMAC-SHA512 for passphrases, so the gain from AES acceleration alone
+is moderate for page I/O and none for key derivation unless the CPU also has
+the SHA-512 extension.
 
 ### Incompatibilities of SQLCipher
 
@@ -79,13 +95,28 @@ See also [PRAGMA key](https://www.zetetic.net/sqlcipher/sqlcipher-api/#PRAGMA_ke
 |---|---|
 | `_pragma_key` | Encryption key (hex with `x'...'` prefix, or passphrase via `url.QueryEscape()`) |
 | `_pragma_cipher_page_size` | Page size for the encrypted database (default: SQLCipher default) |
-| `_pragma_cipher_compatibility` | Set to `3` to open SQLCipher 3.x databases |
+| `_pragma_cipher_compatibility` | Set to `3` to open SQLCipher 3.x databases (applied before the settings below, which override it) |
+| `_pragma_kdf_iter` | PBKDF2 iterations for passphrase keys |
+| `_pragma_cipher_hmac_algorithm` | `HMAC_SHA1`, `HMAC_SHA256` or `HMAC_SHA512` |
+| `_pragma_cipher_kdf_algorithm` | `PBKDF2_HMAC_SHA1`, `PBKDF2_HMAC_SHA256` or `PBKDF2_HMAC_SHA512` |
+| `_pragma_cipher_plaintext_header_size` | Bytes of the header left unencrypted (e.g. `32` for iOS shared containers). The salt can then not be stored in the file: use a raw key with salt, `x'<64 hex key><32 hex salt>'` |
+
+All other go-sqlite3 DSN parameters work as well, e.g. `_stmt_cache_size` to
+cache prepared statements per connection.
+
+Settings must match the ones the database was created with. See
+[SQLCipher API](https://www.zetetic.net/sqlcipher/sqlcipher-api/).
 
 ### Utility Functions
 
 Use the function
 [sqlite3.IsEncrypted()](https://godoc.org/github.com/AnoRebel/go-sqlcipher#IsEncrypted)
 to check whether a database file is encrypted or not.
+
+### Maintenance
+
+See [MAINTENANCE](MAINTENANCE). `./check_upstream.sh` reports whether
+go-sqlite3, SQLCipher, libtomcrypt or Mbed TLS have newer versions.
 
 ### Examples
 

@@ -1,39 +1,48 @@
-To maintain this code properly, the following three repositories have to be
+To maintain this code properly, the following repositories have to be
 tracked for changes (maintenance details below):
 
 - https://github.com/mattn/go-sqlite3
 - https://github.com/sqlcipher/sqlcipher
 - https://github.com/libtom/libtomcrypt
+- https://github.com/Mbed-TLS/mbedtls (only library/aesce.c, see below)
+
+Run ./check_upstream.sh to see which of them have newer versions.
 
 
 Update code from https://github.com/mattn/go-sqlite3
 ----------------------------------------------------
 
-Current release: v1.14.34
+Current release: v1.14.53
 
 1. git clone mattn/go-sqlite3 new version to temp dir
-2. Use ./track_go-sqlite3.sh <mattn/go-sqlite3 dir>
-3. find & sed mattn/go-sqlite3 to AnoRebel/go-sqlcipher
-4. rewrite pragma args golang code to sqlite3.go
-   - _pragma_key (MUST execute before all other PRAGMAs)
-   - _pragma_cipher_page_size
-   - _pragma_cipher_compatibility
-5. Add #include <stdint.h> to the C includes in sqlite3.go
+2. ./track_go-sqlite3.sh <mattn/go-sqlite3 dir>
+   (copies Go files and _example, rewrites import paths, and lists Go files
+   that upstream does not have: delete the ones upstream removed/renamed,
+   keep the local ones: flags.go, sqlcipher.go, sqlcipher_test.go,
+   crypto_check.go, crypto_test.go, sqlite3_opt_json1.go)
+3. Re-apply to sqlite3.go:
+   - #include <stdint.h> after #include <string.h> in the C preamble
+   - `var cipherPragmas []string` with the other DSN variables in Open
+   - `cipherPragmas, err = parseCipherPragmas(params)` after the vfs param
+   - execute cipherPragmas right after the `exec` helper is defined, before
+     "Busy timeout" (PRAGMA key MUST run before all other statements)
+4. Update the version in this file and in README.md
 
 
 Update code from https://github.com/sqlcipher/sqlcipher
 -------------------------------------------------------
 
-Current release: v4.14.0
+Current release: v4.20.0 (SQLite 3.54.1)
 
 Note:
 v4.14.0 restored LibTomCrypt support (it was removed in v4.12.0).
 If a future version removes it again, revert the corresponding commit
 (see https://github.com/sqlcipher/sqlcipher/issues/564).
+SQLCipher 5.x is not compatible with 4.x databases by default.
 
 Execute:
 1. git clone sqlcipher to temp dir
-2. git checkout v4.14.0
+2. git checkout v4.20.0
 3. ./configure --with-tempstore=yes \
      CFLAGS="-DSQLITE_HAS_CODEC \
              -DSQLITE_EXTRA_INIT=sqlcipher_extra_init \
@@ -41,21 +50,39 @@ Execute:
              -DSQLCIPHER_CRYPTO_LIBTOMCRYPT"
 4. make sqlite3.c
 5. Copy sqlite3.c and sqlite3.h
-6. Fix const qualifier warnings in sqlite3.c:
-   - strrchr() and strchr() return const char* when given const char*,
-     add explicit (char*) cast where assigned to non-const
+6. Check for compiler warnings (gcc and clang, -Wall) with the cgo flags from
+   flags.go. Since v4.20.0 none need patching; older releases needed (char*)
+   casts where strrchr()/strchr() results were assigned to non-const.
 
 
 Update code from https://github.com/libtom/libtomcrypt
 ------------------------------------------------------
 
-Current HEAD: 63af5f6dc15a686ff2099676e0fd02550ec87659
-(from develop branch, 2026-02-04)
+Current HEAD: 6c6d5104de66f3ca0dfd7b68540ef86869982b07
+(from develop branch, 2026-09-01)
 
-Note: libtomcrypt has governance issues — the last official release was
-many years ago and all development happens on the develop branch.
+Note: the last official release is v1.18.2 (2018); all development happens
+on the develop branch.
 
-Use ./track_libtomcrypt.sh <libtomcrypt dir>
+./track_libtomcrypt.sh <libtomcrypt dir>
+copies the files, makes aes.c include aes_tab.h instead of aes_tab.c and
+applies patches/aes_desc_armce.patch (ARMv8 AES dispatch, see below).
 
-After running the script:
-- Make sure aes.c includes aes_tab.h instead of aes_tab.c
+Hardware acceleration is LibTomCrypt's own runtime detection (do not define
+LTC_NO_ASM or LTC_NO_ACCEL in flags.go):
+- x86/x86_64: AES-NI (aesni.c), SHA extensions (sha*_x86.c)
+- aarch64: ARMv8 Crypto Extensions AES via aes_armce.c (go-sqlcipher)
+Defining LTC_NO_ACCEL (e.g. CGO_CFLAGS=-DLTC_NO_ACCEL) forces the portable C
+implementations; CI tests that configuration.
+
+
+ARMv8 AES (aes_armce.c, aes_armce.h, patches/aes_desc_armce.patch)
+------------------------------------------------------------------
+
+Not from any upstream: glue that lets LibTomCrypt's aes_desc use the ARMv8
+Cryptography Extensions on aarch64, mirroring its AES-NI dispatch. The round
+function, key expansion and inverse key schedule are derived from Mbed TLS
+3.6.7 library/aesce.c. When Mbed TLS releases a new 3.6.x, check
+git log mbedtls-3.6.7..mbedtls-3.6.N -- library/aesce.c
+for fixes relevant to these parts. crypto_test.go cross-checks the result
+against the portable implementation (CI runs it on arm64 Linux and macOS).
