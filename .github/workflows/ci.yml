@@ -12,12 +12,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: ['1.26']
-        os: [ubuntu-latest, macos-latest]
+        go-version: ['1.26', '1.27']
+        # ubuntu-24.04-arm and macos-latest (Apple Silicon) run the ARMv8 AES path
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v6
-    - uses: actions/setup-go@v6
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
       with:
         go-version: ${{ matrix.go-version }}
     - name: Build
@@ -30,13 +31,13 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
-    - uses: actions/setup-go@v6
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
       with:
-        go-version: '1.26'
+        go-version: '1.27'
     - uses: golangci/golangci-lint-action@v9
       with:
-        version: v2.11.4
+        version: v2.15.0
 
   test-build-tags:
     runs-on: ubuntu-latest
@@ -49,23 +50,37 @@ jobs:
           - "sqlite_math_functions"
           - "sqlite_column_metadata"
           - "sqlite_unlock_notify"
+          - "sqlite_dbstat"
     steps:
-    - uses: actions/checkout@v6
-    - uses: actions/setup-go@v6
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
       with:
-        go-version: '1.26'
+        go-version: '1.27'
     - name: Build with tag ${{ matrix.tags }}
       run: go build -v -tags "${{ matrix.tags }}" ./...
     - name: Test with tag ${{ matrix.tags }}
       run: go test -v -race -count=1 -tags "${{ matrix.tags }}" -timeout 10m ./...
 
+  # hardware AES/SHA disabled: the portable C implementations must keep working
+  test-portable-crypto:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version: '1.27'
+    - name: Test without hardware acceleration
+      env:
+        CGO_CFLAGS: "-g -O2 -DLTC_NO_ACCEL"
+      run: go test -v -count=1 -timeout 10m ./...
+
   cross-compile:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
-    - uses: actions/setup-go@v6
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
       with:
-        go-version: '1.26'
+        go-version: '1.27'
     - name: Install cross-compiler
       run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
     - name: Build linux/amd64
