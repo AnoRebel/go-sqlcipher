@@ -19,6 +19,11 @@ linters:
         - (io.Closer).Close
         - (database/sql/driver.Stmt).Close
         - (database/sql/driver.Rows).Close
+    govet:
+      disable:
+        # go:fix inline suggestions (e.g. reflect.Ptr, ioutil) in vendored
+        # go-sqlite3 code; upstream decides when to modernize
+        - inline
   exclusions:
     presets:
       - std-error-handling
@@ -36,13 +41,27 @@ linters:
       - linters:
           - staticcheck
         text: "ST1005"
-      # Upstream ineffectual assignments in tests
+      # Upstream ineffectual assignments, dead values and unused helpers in tests
       - path: _test\.go
         linters:
           - ineffassign
+          - unused
+      - path: _test\.go
+        linters:
+          - staticcheck
+        text: "SA4006|SA1019: io/ioutil"
+      # Style-only quickfix suggestions in vendored go-sqlite3 code; patching
+      # them would be undone by every upstream sync
+      - linters:
+          - staticcheck
+        text: "QF1007|QF1008|S1021"
+      # Upstream best-effort ROLLBACK after a failed COMMIT
+      - path: sqlite3\.go
+        linters:
+          - errcheck
+        text: "tx.c.exec"
     paths:
       - _example
-      - upgrade
       - util
 
 formatters:

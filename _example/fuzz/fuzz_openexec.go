@@ -3,7 +3,7 @@ package sqlite3_fuzz
 import (
 	"bytes"
 	"database/sql"
-	"os"
+	"io/ioutil"
 
 	_ "github.com/AnoRebel/go-sqlcipher"
 )
@@ -13,7 +13,7 @@ func FuzzOpenExec(data []byte) int {
 	if sep <= 0 {
 		return 0
 	}
-	err := os.WriteFile("/tmp/fuzz.db", data[sep+1:], 0644)
+	err := ioutil.WriteFile("/tmp/fuzz.db", data[sep+1:], 0644)
 	if err != nil {
 		return 0
 	}
@@ -22,7 +22,7 @@ func FuzzOpenExec(data []byte) int {
 		return 0
 	}
 	defer db.Close()
-	_, err = db.Exec(string(data[:sep-1]))
+	_, err = db.Exec(string(data[:sep]))
 	if err != nil {
 		return 0
 	}

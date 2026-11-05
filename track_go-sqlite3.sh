@@ -9,15 +9,26 @@ fi
 
 ltd=$1
 
+# report Go files that upstream does not have: either local additions (keep)
+# or files upstream removed/renamed (delete)
+for f in *.go
+do
+  [ -e "$ltd/$f" ] || echo "not in upstream (keep if local, delete if removed upstream): $f"
+done
+
 # copy C files
-cp -f $ltd/sqlite3_opt_unlock_notify.c .
+cp -f "$ltd"/sqlite3_opt_unlock_notify.c .
 
 # copy Go files
-cp -f $ltd/*.go .
+cp -f "$ltd"/*.go .
 rm -rf _example
-cp -r $ltd/_example .
-rm -rf upgrade
-cp -r $ltd/upgrade .
+cp -r "$ltd"/_example .
 
-echo "make sure to adjust sqlite3.go with sqlcipher pragmas!"
-echo "make sure to adjust import paths in _example directory!"
+# rewrite import paths
+for f in *.go $(find _example -name '*.go' -o -name Makefile -o -name Dockerfile)
+do
+  sed 's#github.com/mattn/go-sqlite3#github.com/AnoRebel/go-sqlcipher#g' "$f" > "$f.tmp"
+  mv "$f.tmp" "$f"
+done
+
+echo "make sure to adjust sqlite3.go with sqlcipher pragmas and #include <stdint.h>!"

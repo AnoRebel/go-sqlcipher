@@ -27,7 +27,8 @@ func (c *SQLiteConn) Serialize(schema string) ([]byte, error) {
 	if schema == "" {
 		schema = "main"
 	}
-	zSchema := C.CString(schema)
+	var zSchema *C.char
+	zSchema = C.CString(schema)
 	defer C.free(unsafe.Pointer(zSchema))
 
 	var sz C.sqlite3_int64
@@ -41,9 +42,8 @@ func (c *SQLiteConn) Serialize(schema string) ([]byte, error) {
 		return nil, fmt.Errorf("serialized database is too large (%d bytes)", sz)
 	}
 
-	cBuf := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), int(sz))
 	res := make([]byte, int(sz))
-	copy(res, cBuf)
+	copy(res, unsafe.Slice((*byte)(unsafe.Pointer(ptr)), int(sz)))
 	return res, nil
 }
 
@@ -55,12 +55,15 @@ func (c *SQLiteConn) Deserialize(b []byte, schema string) error {
 	if schema == "" {
 		schema = "main"
 	}
-	zSchema := C.CString(schema)
+	var zSchema *C.char
+	zSchema = C.CString(schema)
 	defer C.free(unsafe.Pointer(zSchema))
 
 	tmpBuf := (*C.uchar)(C.sqlite3_malloc64(C.sqlite3_uint64(len(b))))
-	cBuf := unsafe.Slice((*byte)(unsafe.Pointer(tmpBuf)), len(b))
-	copy(cBuf, b)
+	if tmpBuf == nil && len(b) > 0 {
+		return fmt.Errorf("deserialize failed: out of memory")
+	}
+	copy(unsafe.Slice((*byte)(unsafe.Pointer(tmpBuf)), len(b)), b)
 
 	rc := C.sqlite3_deserialize(c.db, zSchema, tmpBuf, C.sqlite3_int64(len(b)),
 		C.sqlite3_int64(len(b)), C.SQLITE_DESERIALIZE_FREEONCLOSE)

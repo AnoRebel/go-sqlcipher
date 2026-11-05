@@ -4,7 +4,6 @@
 // license that can be found in the LICENSE file.
 
 //go:build cgo
-// +build cgo
 
 package sqlite3
 
@@ -23,7 +22,7 @@ func TestFTS3(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, _ = db.Exec("DROP TABLE foo")
+	_, err = db.Exec("DROP TABLE foo")
 	_, err = db.Exec("CREATE VIRTUAL TABLE foo USING fts3(id INTEGER PRIMARY KEY, value TEXT)")
 	if err != nil {
 		t.Fatal("Failed to create table:", err)
@@ -94,7 +93,7 @@ func TestFTS4(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, _ = db.Exec("DROP TABLE foo")
+	_, err = db.Exec("DROP TABLE foo")
 	_, err = db.Exec("CREATE VIRTUAL TABLE foo USING fts4(tokenize=unicode61, id INTEGER PRIMARY KEY, value TEXT)")
 	switch {
 	case err != nil && err.Error() == "unknown tokenizer: unicode61":

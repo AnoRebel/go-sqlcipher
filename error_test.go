@@ -4,12 +4,12 @@
 // license that can be found in the LICENSE file.
 
 //go:build cgo
-// +build cgo
 
 package sqlite3
 
 import (
 	"database/sql"
+	"io/ioutil"
 	"os"
 	"path"
 	"testing"
@@ -23,7 +23,11 @@ func TestSimpleError(t *testing.T) {
 }
 
 func TestCorruptDbErrors(t *testing.T) {
-	dirName := t.TempDir()
+	dirName, err := ioutil.TempDir("", "sqlite3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dirName)
 
 	dbFileName := path.Join(dirName, "test.db")
 	f, err := os.Create(dbFileName)
@@ -52,7 +56,11 @@ func TestCorruptDbErrors(t *testing.T) {
 }
 
 func TestSqlLogicErrors(t *testing.T) {
-	dirName := t.TempDir()
+	dirName, err := ioutil.TempDir("", "sqlite3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dirName)
 
 	dbFileName := path.Join(dirName, "test.db")
 	db, err := sql.Open("sqlite3", dbFileName)
@@ -75,7 +83,11 @@ func TestSqlLogicErrors(t *testing.T) {
 }
 
 func TestExtendedErrorCodes_ForeignKey(t *testing.T) {
-	dirName := t.TempDir()
+	dirName, err := ioutil.TempDir("", "sqlite3-err")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dirName)
 
 	dbFileName := path.Join(dirName, "test.db")
 	db, err := sql.Open("sqlite3", dbFileName)
@@ -117,7 +129,11 @@ func TestExtendedErrorCodes_ForeignKey(t *testing.T) {
 }
 
 func TestExtendedErrorCodes_NotNull(t *testing.T) {
-	dirName := t.TempDir()
+	dirName, err := ioutil.TempDir("", "sqlite3-err")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dirName)
 
 	dbFileName := path.Join(dirName, "test.db")
 	db, err := sql.Open("sqlite3", dbFileName)
@@ -169,7 +185,11 @@ func TestExtendedErrorCodes_NotNull(t *testing.T) {
 }
 
 func TestExtendedErrorCodes_Unique(t *testing.T) {
-	dirName := t.TempDir()
+	dirName, err := ioutil.TempDir("", "sqlite3-err")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dirName)
 
 	dbFileName := path.Join(dirName, "test.db")
 	db, err := sql.Open("sqlite3", dbFileName)

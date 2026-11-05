@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -638,4 +639,98 @@ func ExampleIsEncrypted() {
 	}
 	// Output:
 	// DB is encrypted
+}
+
+func openDSN(t *testing.T, dsn string) *sql.DB {
+	t.Helper()
+	d, err := sql.Open("sqlite3", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { d.Close() })
+	return d
+}
+
+func pragmaString(t *testing.T, d *sql.DB, pragma string) string {
+	t.Helper()
+	var v string
+	require.NoError(t, d.QueryRow("PRAGMA "+pragma+";").Scan(&v))
+	return v
+}
+
+func TestSQLCipherKeyWithQuotes(t *testing.T) {
+	dbname := filepath.Join(t.TempDir(), "quotes.db")
+	// quotes and a semicolon must be part of the key, not SQL
+	key := url.QueryEscape(`p"a'ss;DROP TABLE x;--`)
+	d := openDSN(t, dbname+"?_pragma_key="+key)
+	_, err := d.Exec("CREATE TABLE t (v INTEGER); INSERT INTO t VALUES (42);")
+	require.NoError(t, err)
+	d.Close()
+
+	var v int
+	require.NoError(t, openDSN(t, dbname+"?_pragma_key="+key).QueryRow("SELECT v FROM t;").Scan(&v))
+	assert.Equal(t, 42, v)
+
+	wrong := openDSN(t, dbname+"?_pragma_key="+url.QueryEscape(`p"a'ss`))
+	assert.Error(t, wrong.QueryRow("SELECT v FROM t;").Scan(&v))
+}
+
+func TestSQLCipherCompatibilityKeepsExplicitSettings(t *testing.T) {
+	// cipher_compatibility resets all settings, so explicit ones given in the
+	// same DSN must be applied after it, whatever the parameter order
+	dbname := filepath.Join(t.TempDir(), "compat.db")
+	d := openDSN(t, dbname+"?_pragma_cipher_page_size=4096&_pragma_key=secret&_pragma_cipher_compatibility=3")
+	assert.Equal(t, "4096", pragmaString(t, d, "cipher_page_size"))
+	assert.Equal(t, "64000", pragmaString(t, d, "kdf_iter")) // v3 default
+}
+
+func TestSQLCipherCipherSettings(t *testing.T) {
+	dbname := filepath.Join(t.TempDir(), "settings.db")
+	dsn := dbname + "?_pragma_key=secret&_pragma_kdf_iter=1000" +
+		"&_pragma_cipher_hmac_algorithm=hmac_sha256&_pragma_cipher_kdf_algorithm=PBKDF2_HMAC_SHA256"
+	d := openDSN(t, dsn)
+	assert.Equal(t, "1000", pragmaString(t, d, "kdf_iter"))
+	assert.Equal(t, "HMAC_SHA256", pragmaString(t, d, "cipher_hmac_algorithm"))
+	assert.Equal(t, "PBKDF2_HMAC_SHA256", pragmaString(t, d, "cipher_kdf_algorithm"))
+	_, err := d.Exec("CREATE TABLE t (v INTEGER);")
+	require.NoError(t, err)
+	d.Close()
+
+	// default settings must not decrypt it
+	_, err = openDSN(t, dbname+"?_pragma_key=secret").Exec("SELECT count(*) FROM sqlite_master;")
+	assert.Error(t, err)
+	// the same settings must
+	_, err = openDSN(t, dsn).Exec("SELECT count(*) FROM sqlite_master;")
+	assert.NoError(t, err)
+}
+
+func TestSQLCipherPlaintextHeader(t *testing.T) {
+	// with a plaintext header SQLCipher cannot store the salt in the file, so
+	// it is supplied as part of the raw key: x'<64 hex key><32 hex salt>'
+	dbname := filepath.Join(t.TempDir(), "header.db")
+	dsn := dbname + "?_pragma_key=x'" + strings.Repeat("ab", 32) + strings.Repeat("01", 16) + "'&_pragma_cipher_plaintext_header_size=32"
+	d := openDSN(t, dsn)
+	_, err := d.Exec("CREATE TABLE t (v INTEGER); INSERT INTO t VALUES (7);")
+	require.NoError(t, err)
+	d.Close()
+
+	// the file starts with the SQLite magic
+	encrypted, err := sqlite3.IsEncrypted(dbname)
+	require.NoError(t, err)
+	assert.False(t, encrypted)
+
+	var v int
+	require.NoError(t, openDSN(t, dsn).QueryRow("SELECT v FROM t;").Scan(&v))
+	assert.Equal(t, 7, v)
+}
+
+func TestSQLCipherInvalidDSN(t *testing.T) {
+	dbname := filepath.Join(t.TempDir(), "invalid.db")
+	for _, q := range []string{
+		"_pragma_cipher_hmac_algorithm=HMAC_SHA1;DROP",
+		"_pragma_cipher_kdf_algorithm=MD5",
+		"_pragma_kdf_iter=lots",
+		"_pragma_cipher_plaintext_header_size=x",
+	} {
+		_, err := openDSN(t, dbname+"?_pragma_key=k&"+q).Exec("SELECT 1;")
+		assert.Error(t, err, q)
+	}
 }
