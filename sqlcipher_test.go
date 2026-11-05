@@ -734,3 +734,64 @@ func TestSQLCipherInvalidDSN(t *testing.T) {
 		assert.Error(t, err, q)
 	}
 }
+
+// BenchmarkSQLCipherKeyDerivation measures opening a passphrase-keyed
+// database: PBKDF2-HMAC-SHA512 with 256000 iterations (SQLCipher 4 default).
+func BenchmarkSQLCipherKeyDerivation(b *testing.B) {
+	dbname := filepath.Join(b.TempDir(), "kdf.db")
+	d, err := sql.Open("sqlite3", dbname+"?_pragma_key=secret")
+	require.NoError(b, err)
+	_, err = d.Exec("CREATE TABLE t (v INTEGER);")
+	require.NoError(b, err)
+	d.Close()
+	for b.Loop() {
+		d, err := sql.Open("sqlite3", dbname+"?_pragma_key=secret")
+		require.NoError(b, err)
+		_, err = d.Exec("SELECT count(*) FROM t;")
+		require.NoError(b, err)
+		d.Close()
+	}
+}
+
+// benchRawKeyDSN uses a raw key (no PBKDF2), a tiny page cache so pages are
+// encrypted/decrypted on every access, and no fsync so disk speed does not
+// dominate.
+func benchRawKeyDSN(dbname string) string {
+	return dbname + "?_pragma_key=x'" + strings.Repeat("2d", 32) + "'&_cache_size=-64&_journal_mode=MEMORY&_sync=OFF"
+}
+
+// BenchmarkSQLCipherWrite measures page encryption + HMAC on inserts.
+func BenchmarkSQLCipherWrite(b *testing.B) {
+	d, err := sql.Open("sqlite3", benchRawKeyDSN(filepath.Join(b.TempDir(), "write.db")))
+	require.NoError(b, err)
+	defer d.Close()
+	_, err = d.Exec("CREATE TABLE t (v BLOB);")
+	require.NoError(b, err)
+	blob := make([]byte, 64*1024)
+	b.SetBytes(int64(len(blob)))
+	for b.Loop() {
+		_, err := d.Exec("INSERT INTO t VALUES (?);", blob)
+		require.NoError(b, err)
+	}
+}
+
+// BenchmarkSQLCipherRead measures page decryption + HMAC verification on a
+// full scan of a 4 MiB table.
+func BenchmarkSQLCipherRead(b *testing.B) {
+	d, err := sql.Open("sqlite3", benchRawKeyDSN(filepath.Join(b.TempDir(), "read.db")))
+	require.NoError(b, err)
+	defer d.Close()
+	_, err = d.Exec("CREATE TABLE t (v BLOB);")
+	require.NoError(b, err)
+	blob := make([]byte, 64*1024)
+	for range 64 {
+		_, err = d.Exec("INSERT INTO t VALUES (?);", blob)
+		require.NoError(b, err)
+	}
+	b.SetBytes(64 * int64(len(blob)))
+	for b.Loop() {
+		var n int64
+		// instr must read every overflow page; length() would not
+		require.NoError(b, d.QueryRow("SELECT sum(instr(v, x'ff')) FROM t;").Scan(&n))
+	}
+}

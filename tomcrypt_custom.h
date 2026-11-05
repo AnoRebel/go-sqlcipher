@@ -126,6 +126,7 @@
    #define LTC_RIJNDAEL
    #define LTC_SHA256
    #define LTC_YARROW
+   #define LTC_ECB_MODE
    #define LTC_CTR_MODE
 
    #define LTC_RNG_MAKE_PRNG
@@ -145,6 +146,9 @@
 
 /* Use small code where possible */
 /* #define LTC_SMALL_CODE */
+
+/* Always use small stack sizes where possible */
+/* #define LTC_SMALL_STACK */
 
 /* clean the stack of functions which put private information on stack */
 /* #define LTC_CLEAN_STACK */
@@ -212,9 +216,11 @@
 #define LTC_IDEA
 #define LTC_SERPENT
 #define LTC_TEA
+#define LTC_ARIA
 
 /* stream ciphers */
 #define LTC_CHACHA
+#define LTC_XCHACHA20
 #define LTC_SALSA20
 #define LTC_XSALSA20
 #define LTC_SOSEMANUK
@@ -277,6 +283,8 @@
 #define LTC_RIPEMD320
 #define LTC_BLAKE2S
 #define LTC_BLAKE2B
+#define LTC_SM3
+#define LTC_BLAKE3
 
 #define LTC_HASH_HELPERS
 
@@ -295,17 +303,18 @@
 #define LTC_POLY1305
 #define LTC_BLAKE2SMAC
 #define LTC_BLAKE2BMAC
+#define LTC_KMAC
 
 /* ---> Encrypt + Authenticate Modes <--- */
 
 #define LTC_EAX_MODE
 
-#define LTC_OCB_MODE
 #define LTC_OCB3_MODE
 #define LTC_CCM_MODE
 #define LTC_GCM_MODE
 #define LTC_CHACHA20POLY1305_MODE
 #define LTC_SIV_MODE
+#define LTC_GCM_SIV_MODE
 
 /* Use 64KiB tables */
 #ifndef LTC_NO_TABLES
@@ -450,6 +459,9 @@
 /* Ed25519 & X25519 */
 #define LTC_CURVE25519
 
+/* Ed448 & X448 */
+#define LTC_CURVE448
+
 /* ECC */
 #define LTC_MECC
 
@@ -511,6 +523,10 @@
 #define LTC_BCRYPT_DEFAULT_ROUNDS 10
 #endif
 
+#define LTC_ARGON2
+
+#define LTC_SCRYPT
+
 /* Keep LTC_NO_HKDF for compatibility reasons
  * superseeded by LTC_NO_MISC*/
 #ifndef LTC_NO_HKDF
@@ -571,6 +587,7 @@
    #define LTC_ECC_SECP256R1
    #define LTC_ECC_SECP384R1
    #define LTC_ECC_SECP521R1
+   #define LTC_ECC_FRP256V1
 #endif
 #endif /* LTC_MECC */
 
@@ -605,6 +622,10 @@
    #ifndef LTC_DER_MAX_RECURSION
       /* Maximum recursion limit when processing nested ASN.1 types. */
       #define LTC_DER_MAX_RECURSION 30
+   #endif
+   #ifndef LTC_DER_OID_DEFAULT_NODES
+      /* Default number of nodes when decoding an OID. */
+      #define LTC_DER_OID_DEFAULT_NODES 12
    #endif
 #endif
 
@@ -678,12 +699,24 @@
    #error LTC_BCRYPT requires LTC_BLOWFISH
 #endif
 
+#if defined(LTC_ARGON2) && !defined(LTC_BLAKE2B)
+   #error LTC_ARGON2 requires LTC_BLAKE2B
+#endif
+
+#if defined(LTC_SCRYPT) && (!defined(LTC_PKCS_5) || !defined(LTC_SHA256))
+   #error LTC_SCRYPT requires LTC_PKCS_5 and LTC_SHA256
+#endif
+
 #if defined(LTC_CHACHA20POLY1305_MODE) && (!defined(LTC_CHACHA) || !defined(LTC_POLY1305))
    #error LTC_CHACHA20POLY1305_MODE requires LTC_CHACHA + LTC_POLY1305
 #endif
 
 #if defined(LTC_CHACHA20_PRNG) && !defined(LTC_CHACHA)
    #error LTC_CHACHA20_PRNG requires LTC_CHACHA
+#endif
+
+#if defined(LTC_XCHACHA20) && !defined(LTC_CHACHA)
+   #error LTC_XCHACHA20 requires LTC_CHACHA
 #endif
 
 #if defined(LTC_XSALSA20) && !defined(LTC_SALSA20)
@@ -704,6 +737,10 @@
 
 #if defined(LTC_BLAKE2BMAC) && !defined(LTC_BLAKE2B)
    #error LTC_BLAKE2BMAC requires LTC_BLAKE2B
+#endif
+
+#if defined(LTC_KMAC) && !defined(LTC_SHA3)
+   #error LTC_KMAC requires LTC_SHA3
 #endif
 
 #if defined(LTC_SPRNG) && !defined(LTC_RNG_GET_BYTES)
@@ -728,7 +765,7 @@
    #error LTC_ECB_MODE not defined, but all other modes depend on it
 #endif
 #if defined(LTC_OMAC) || defined(LTC_PMAC) || defined(LTC_XCBC) || defined(LTC_F9_MODE) || defined(LTC_EAX_MODE) || \
-    defined(LTC_OCB_MODE) || defined(LTC_OCB3_MODE) || defined(LTC_CCM_MODE) || defined(LTC_GCM_MODE) )
+    defined(LTC_OCB3_MODE) || defined(LTC_CCM_MODE) || defined(LTC_GCM_MODE) )
    #error LTC_ECB_MODE not defined, but most MAC and AEAD modes depend on it
 #endif
 #endif

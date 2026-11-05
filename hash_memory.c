@@ -19,8 +19,9 @@
 */
 int hash_memory(int hash, const unsigned char *in, unsigned long inlen, unsigned char *out, unsigned long *outlen)
 {
-    hash_state *md;
-    int err;
+    hash_state    *md;
+    unsigned long hashsize;
+    int           err;
 
     LTC_ARGCHK(in     != NULL);
     LTC_ARGCHK(out    != NULL);
@@ -30,8 +31,10 @@ int hash_memory(int hash, const unsigned char *in, unsigned long inlen, unsigned
         return err;
     }
 
-    if (*outlen < hash_descriptor[hash].hashsize) {
-       *outlen = hash_descriptor[hash].hashsize;
+    hashsize = hash_descriptor[hash].hashsize;
+
+    if (*outlen < hashsize) {
+       *outlen = hashsize;
        return CRYPT_BUFFER_OVERFLOW;
     }
 
@@ -47,7 +50,7 @@ int hash_memory(int hash, const unsigned char *in, unsigned long inlen, unsigned
        goto LBL_ERR;
     }
     err = hash_descriptor[hash].done(md, out);
-    *outlen = hash_descriptor[hash].hashsize;
+    *outlen = hashsize;
 LBL_ERR:
 #ifdef LTC_CLEAN_STACK
     zeromem(md, sizeof(hash_state));

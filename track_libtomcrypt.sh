@@ -8,75 +8,64 @@ then
 fi
 
 ltd=$1
+src=$ltd/src
 
 # copy header files
-cp -f $ltd/src/headers/tomcrypt_argchk.h .
-cp -f $ltd/src/headers/tomcrypt_cfg.h .
-cp -f $ltd/src/headers/tomcrypt_cipher.h .
-cp -f $ltd/src/headers/tomcrypt_custom.h .
-cp -f $ltd/src/headers/tomcrypt.h .
-cp -f $ltd/src/headers/tomcrypt_hash.h .
-cp -f $ltd/src/headers/tomcrypt_mac.h .
-cp -f $ltd/src/headers/tomcrypt_macros.h .
-cp -f $ltd/src/headers/tomcrypt_math.h .
-cp -f $ltd/src/headers/tomcrypt_misc.h .
-cp -f $ltd/src/headers/tomcrypt_pkcs.h .
-cp -f $ltd/src/headers/tomcrypt_pk.h .
-cp -f $ltd/src/headers/tomcrypt_private.h .
-cp -f $ltd/src/headers/tomcrypt_prng.h .
+for h in argchk cfg cipher custom hash mac macros math misc pkcs pk private prng
+do
+  cp -f "$src/headers/tomcrypt_$h.h" .
+done
+cp -f "$src/headers/tomcrypt.h" .
 
-# copy C files - AES
-cp -f $ltd/src/ciphers/aes/aes.c .
-cp -f $ltd/src/ciphers/aes/aes_tab.c aes_tab.h
-cp -f $ltd/src/ciphers/aes/aes_desc.c .
+# AES (aesni.c is LibTomCrypt's runtime-detected AES-NI implementation)
+cp -f "$src/ciphers/aes/aes.c" .
+cp -f "$src/ciphers/aes/aes_desc.c" .
+cp -f "$src/ciphers/aes/aesni.c" .
+cp -f "$src/ciphers/aes/aes_tab.c" aes_tab.h
+sed 's#include "aes_tab.c"#include "aes_tab.h"#' aes.c > aes.c.tmp && mv aes.c.tmp aes.c
 
-# copy C files - misc
-cp -f $ltd/src/misc/burn_stack.c .
-cp -f $ltd/src/misc/compare_testvector.c .
-cp -f $ltd/src/misc/zeromem.c .
+# misc
+cp -f "$src/misc/burn_stack.c" .
+cp -f "$src/misc/compare_testvector.c" .
+cp -f "$src/misc/zeromem.c" .
 
-# copy C files - CBC mode
-cp -f $ltd/src/modes/cbc/cbc_decrypt.c .
-cp -f $ltd/src/modes/cbc/cbc_done.c .
-cp -f $ltd/src/modes/cbc/cbc_encrypt.c .
-cp -f $ltd/src/modes/cbc/cbc_start.c .
+# CBC and ECB modes
+for f in decrypt done encrypt start
+do
+  cp -f "$src/modes/cbc/cbc_$f.c" .
+  cp -f "$src/modes/ecb/ecb_$f.c" .
+done
 
-# copy C files - ECB mode
-cp -f $ltd/src/modes/ecb/ecb_decrypt.c .
-cp -f $ltd/src/modes/ecb/ecb_done.c .
-cp -f $ltd/src/modes/ecb/ecb_encrypt.c .
-cp -f $ltd/src/modes/ecb/ecb_start.c .
+# crypt registry
+for f in argchk cipher_descriptor cipher_is_valid find_cipher find_hash \
+         hash_descriptor hash_is_valid prng_descriptor register_cipher \
+         register_hash register_prng
+do
+  cp -f "$src/misc/crypt/crypt_$f.c" .
+done
 
-# copy C files - crypt registry
-cp -f $ltd/src/misc/crypt/crypt_argchk.c .
-cp -f $ltd/src/misc/crypt/crypt_cipher_descriptor.c .
-cp -f $ltd/src/misc/crypt/crypt_cipher_is_valid.c .
-cp -f $ltd/src/misc/crypt/crypt_find_cipher.c .
-cp -f $ltd/src/misc/crypt/crypt_find_hash.c .
-cp -f $ltd/src/misc/crypt/crypt_hash_descriptor.c .
-cp -f $ltd/src/misc/crypt/crypt_hash_is_valid.c .
-cp -f $ltd/src/misc/crypt/crypt_prng_descriptor.c .
-cp -f $ltd/src/misc/crypt/crypt_register_cipher.c .
-cp -f $ltd/src/misc/crypt/crypt_register_hash.c .
-cp -f $ltd/src/misc/crypt/crypt_register_prng.c .
+# PRNG
+cp -f "$src/prngs/fortuna.c" .
+cp -f "$src/prngs/rng_get_bytes.c" .
 
-# copy C files - PRNG
-cp -f $ltd/src/prngs/fortuna.c .
-cp -f $ltd/src/prngs/rng_get_bytes.c .
+# hashes (*_desc.c dispatches at runtime to the *_x86.c SHA extensions)
+cp -f "$src/hashes/helper/hash_memory.c" .
+cp -f "$src/hashes/sha1.c" "$src/hashes/sha1_desc.c" "$src/hashes/sha1_x86.c" .
+for h in sha256 sha512
+do
+  cp -f "$src/hashes/sha2/$h.c" "$src/hashes/sha2/${h}_desc.c" "$src/hashes/sha2/${h}_x86.c" .
+done
 
-# copy C files - hash
-cp -f $ltd/src/hashes/helper/hash_memory.c .
-cp -f $ltd/src/hashes/sha1.c .
-cp -f $ltd/src/hashes/sha2/sha256.c .
-cp -f $ltd/src/hashes/sha2/sha512.c .
+# HMAC
+for f in done init memory process
+do
+  cp -f "$src/mac/hmac/hmac_$f.c" .
+done
 
-# copy C files - HMAC
-cp -f $ltd/src/mac/hmac/hmac_done.c .
-cp -f $ltd/src/mac/hmac/hmac_init.c .
-cp -f $ltd/src/mac/hmac/hmac_memory.c .
-cp -f $ltd/src/mac/hmac/hmac_process.c .
+# PKCS #5
+cp -f "$src/misc/pkcs5/pkcs_5_2.c" .
 
-# copy C files - PKCS
-cp -f $ltd/src/misc/pkcs5/pkcs_5_2.c .
+# go-sqlcipher: dispatch aes_desc to ARMv8 Crypto Extensions (aes_armce.c)
+patch -p1 --no-backup-if-mismatch < "$(dirname "$0")/patches/aes_desc_armce.patch"
 
-echo "make sure aes.c includes aes_tab.h instead of aes_tab.c!"
+echo "libtomcrypt commit: $(git -C "$ltd" rev-parse HEAD 2>/dev/null || echo unknown) - update MAINTENANCE"

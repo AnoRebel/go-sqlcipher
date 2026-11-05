@@ -21,8 +21,9 @@ package sqlite3
 // use libtomcrypt implementation in sqlcipher
 #cgo CFLAGS: -DSQLCIPHER_CRYPTO_LIBTOMCRYPT
 
-// disable anything "not portable" in libtomcrypt
-#cgo CFLAGS: -DLTC_NO_ASM
+// libtomcrypt picks hardware AES/SHA at runtime (AES-NI and SHA extensions on
+// x86, ARMv8 Crypto Extensions AES on arm64 via aes_armce.c) and falls back
+// to portable C. Build with CGO_CFLAGS=-DLTC_NO_ACCEL to force portable C.
 
 // disable assertions
 #cgo CFLAGS: -DNDEBUG

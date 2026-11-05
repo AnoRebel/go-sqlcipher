@@ -8,6 +8,68 @@
 */
 
 #include "tomcrypt_private.h"
+#include "aes_armce.h"
+
+#if defined(LTC_ARCH_X86) && (defined(LTC_AES_NI) || !defined(ENCRYPT_ONLY))
+
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
+#if !defined (LTC_S_X86_CPUID)
+#define LTC_S_X86_CPUID
+static LTC_INLINE void s_x86_cpuid(int* regs, int leaf)
+{
+#if defined _MSC_VER
+   __cpuid(regs, leaf);
+#else
+   int a, b, c, d;
+
+   a = leaf;
+   b = c = d = 0;
+   __asm__ volatile ("cpuid"
+       :"=a"(a), "=b"(b), "=c"(c), "=d"(d)
+       :"a"(a), "c"(c)
+   );
+   regs[0] = a;
+   regs[1] = b;
+   regs[2] = c;
+   regs[3] = d;
+#endif
+}
+#endif /* LTC_S_X86_CPUID */
+
+#if !defined (LTC_S_AESNI_IS_SUPPORTED)
+#define LTC_S_AESNI_IS_SUPPORTED
+static LTC_INLINE int s_aesni_is_supported(void)
+{
+   static int initialized = 0, is_supported = 0;
+
+   if (initialized == 0) {
+      /* Look for CPUID.1.0.ECX[19] (SSE4.1) and CPUID.1.0.ECX[25] (AES-NI)
+       * EAX = 1, ECX = 0
+       */
+      int regs[4];
+      s_x86_cpuid(regs, 1);
+      is_supported = ((regs[2] >> 19) & 1) && ((regs[2] >> 25) & 1);
+      initialized = 1;
+   }
+
+   return is_supported;
+}
+#endif /* LTC_S_AESNI_IS_SUPPORTED */
+#endif /* LTC_ARCH_X86 */
+
+#ifndef ENCRYPT_ONLY
+int aesni_is_supported(void)
+{
+#if defined(LTC_ARCH_X86)
+   return s_aesni_is_supported();
+#else
+   return 0;
+#endif
+}
+#endif /* ENCRYPT_ONLY */
 
 #if defined(LTC_RIJNDAEL)
 
@@ -48,54 +110,6 @@ const struct ltc_cipher_descriptor aes_enc_desc =
 
 #endif
 
-/* Code partially borrowed from https://software.intel.com/content/www/us/en/develop/articles/intel-sha-extensions.html */
-#if defined(LTC_AES_NI)
-static LTC_INLINE int s_aesni_is_supported(void)
-{
-   static int initialized = 0, is_supported = 0;
-
-   if (initialized == 0) {
-      int a, b, c, d;
-
-      /* Look for CPUID.1.0.ECX[19] (SSE4.1) and CPUID.1.0.ECX[25] (AES-NI)
-       * EAX = 1, ECX = 0
-       */
-      a = 1;
-      c = 0;
-
-#if defined(_MSC_VER) && !defined(__clang__)
-      int arr[4];
-      __cpuidex(arr, a, c);
-      a = arr[0];
-      b = arr[1];
-      c = arr[2];
-      d = arr[3];
-#else
-      __asm__ volatile ("cpuid"
-           :"=a"(a), "=b"(b), "=c"(c), "=d"(d)
-           :"a"(a), "c"(c)
-          );
-#endif
-
-      is_supported = ((c >> 19) & 1) && ((c >> 25) & 1);
-      initialized = 1;
-   }
-
-   return is_supported;
-}
-#endif
-
-#ifndef ENCRYPT_ONLY
-int aesni_is_supported(void)
-{
-#ifdef LTC_AES_NI
-   return s_aesni_is_supported();
-#else
-   return 0;
-#endif
-}
-#endif
-
  /**
     Initialize the AES (Rijndael) block cipher
     @param key The symmetric key you wish to pass
@@ -109,6 +123,11 @@ int AES_SETUP(const unsigned char *key, int keylen, int num_rounds, symmetric_ke
 #ifdef LTC_AES_NI
    if (s_aesni_is_supported()) {
       return aesni_setup(key, keylen, num_rounds, skey);
+   }
+#endif
+#ifdef LTC_AES_ARMCE
+   if (armce_is_supported()) {
+      return armce_setup(key, keylen, num_rounds, skey);
    }
 #endif
    /* Last resort, software AES */
@@ -129,6 +148,11 @@ int AES_ENC(const unsigned char *pt, unsigned char *ct, const symmetric_key *ske
       return aesni_ecb_encrypt(pt, ct, skey);
    }
 #endif
+#ifdef LTC_AES_ARMCE
+   if (armce_is_supported()) {
+      return armce_ecb_encrypt(pt, ct, skey);
+   }
+#endif
    return rijndael_ecb_encrypt(pt, ct, skey);
 }
 
@@ -146,6 +170,11 @@ int AES_DEC(const unsigned char *ct, unsigned char *pt, const symmetric_key *ske
 #ifdef LTC_AES_NI
    if (s_aesni_is_supported()) {
       return aesni_ecb_decrypt(ct, pt, skey);
+   }
+#endif
+#ifdef LTC_AES_ARMCE
+   if (armce_is_supported()) {
+      return armce_ecb_decrypt(ct, pt, skey);
    }
 #endif
    return rijndael_ecb_decrypt(ct, pt, skey);
@@ -264,4 +293,11 @@ int AES_KS(int *keysize)
 }
 
 #endif
+
+#undef AES_SETUP
+#undef AES_ENC
+#undef AES_DEC
+#undef AES_DONE
+#undef AES_TEST
+#undef AES_KS
 

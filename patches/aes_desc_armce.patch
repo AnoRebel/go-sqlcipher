@@ -1,0 +1,46 @@
+--- a/aes_desc.c
++++ b/aes_desc.c
+@@ -8,6 +8,7 @@
+ */
+ 
+ #include "tomcrypt_private.h"
++#include "aes_armce.h"
+ 
+ #if defined(LTC_ARCH_X86) && (defined(LTC_AES_NI) || !defined(ENCRYPT_ONLY))
+ 
+@@ -124,6 +125,11 @@
+       return aesni_setup(key, keylen, num_rounds, skey);
+    }
+ #endif
++#ifdef LTC_AES_ARMCE
++   if (armce_is_supported()) {
++      return armce_setup(key, keylen, num_rounds, skey);
++   }
++#endif
+    /* Last resort, software AES */
+    return rijndael_setup(key, keylen, num_rounds, skey);
+ }
+@@ -142,6 +148,11 @@
+       return aesni_ecb_encrypt(pt, ct, skey);
+    }
+ #endif
++#ifdef LTC_AES_ARMCE
++   if (armce_is_supported()) {
++      return armce_ecb_encrypt(pt, ct, skey);
++   }
++#endif
+    return rijndael_ecb_encrypt(pt, ct, skey);
+ }
+ 
+@@ -161,6 +172,11 @@
+       return aesni_ecb_decrypt(ct, pt, skey);
+    }
+ #endif
++#ifdef LTC_AES_ARMCE
++   if (armce_is_supported()) {
++      return armce_ecb_decrypt(ct, pt, skey);
++   }
++#endif
+    return rijndael_ecb_decrypt(ct, pt, skey);
+ }
+ #endif /* ENCRYPT_ONLY */

@@ -1,331 +1,387 @@
-/*
- *  AES-NI support functions
- *
- *  Copyright The Mbed TLS Contributors
- *  SPDX-License-Identifier: Apache-2.0
- *
- *  Licensed under the Apache License, Version 2.0 (the "License"); you may
- *  not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *  http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- *  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+/* LibTomCrypt, modular cryptographic library -- Tom St Denis */
+/* SPDX-License-Identifier: Unlicense */
 
-/*
- * [AES-WP] https://www.intel.com/content/www/us/en/developer/articles/tool/intel-advanced-encryption-standard-aes-instructions-set.html
- * [CLMUL-WP] https://www.intel.com/content/www/us/en/develop/download/intel-carry-less-multiplication-instruction-and-its-usage-for-computing-the-gcm-mode.html
- */
+/* AES-NI implementation by Steffen Jaeckel */
+/**
+  @file aesni.c
+  Implementation of AES via the AES-NI instruction on x86_64
+*/
 
-#include "aesni.h"
+#include "tomcrypt_private.h"
 
-#if defined(MBEDTLS_AESNI_C)
+#if defined(LTC_AES_NI)
 
-#include <string.h>
-
-#if defined(MBEDTLS_AESNI_HAVE_CODE)
-
-/*
- * AES-NI support detection routine
- */
-int mbedtls_aesni_has_support(unsigned int what)
+const struct ltc_cipher_descriptor aesni_desc =
 {
-    static int done = 0;
-    static unsigned int c = 0;
+    "aes",
+    6,
+    16, 32, 16, 10,
+    aesni_setup, aesni_ecb_encrypt, aesni_ecb_decrypt, aesni_test, aesni_done, aesni_keysize,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+};
 
-    if (!done) {
-        /* AESNI using asm */
-        asm ("movl  $1, %%eax   \n\t"
-             "cpuid             \n\t"
-             : "=c" (c)
-             :
-             : "eax", "ebx", "edx");
-        done = 1;
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-align"
+#pragma GCC diagnostic ignored "-Wdeclaration-after-statement"
+#endif
+#include <emmintrin.h>
+#include <smmintrin.h>
+#include <wmmintrin.h>
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
+#define aesni_setup_mix(t, c) _mm_extract_epi32(_mm_aeskeygenassist_si128(t, 0), c)
+#define temp_load(k) _mm_loadu_si128((__m128i*)(k))
+#define temp_update(t, k) _mm_insert_epi32(t, k, 3)
+#define temp_invert(k) _mm_aesimc_si128(*((__m128i*)(k)))
+
+#define rcon aesni_rcon
+static const ulong32 rcon[] = {
+    0x01UL, 0x02UL, 0x04UL, 0x08UL, 0x10UL, 0x20UL, 0x40UL, 0x80UL, 0x1BUL, 0x36UL
+};
+
+ /**
+    Initialize the AES (Rijndael) block cipher
+    @param key The symmetric key you wish to pass
+    @param keylen The key length in bytes
+    @param num_rounds The number of rounds desired (0 for default)
+    @param skey The key in as scheduled by this function.
+    @return CRYPT_OK if successful
+ */
+LTC_ATTRIBUTE((__target__("aes,sse4.1")))
+int aesni_setup(const unsigned char *key, int keylen, int num_rounds, symmetric_key *skey)
+{
+   int i;
+   __m128i temp;
+   ulong32 *rk, *K;
+   ulong32 *rrk;
+   LTC_ARGCHK(key != NULL);
+   LTC_ARGCHK(skey != NULL);
+
+   if (keylen != 16 && keylen != 24 && keylen != 32) {
+      return CRYPT_INVALID_KEYSIZE;
+   }
+
+   if (num_rounds != 0 && num_rounds != (keylen / 4 + 6)) {
+      return CRYPT_INVALID_ROUNDS;
+   }
+
+   skey->rijndael.Nr = keylen / 4 + 6;
+   K = LTC_ALIGN_BUF(skey->rijndael.K, 16);
+   skey->rijndael.eK = K;
+   K += 60;
+   skey->rijndael.dK = K;
+
+   /* setup the forward key */
+   i = 0;
+   rk = skey->rijndael.eK;
+   LOAD32L(rk[0], key);
+   LOAD32L(rk[1], key + 4);
+   LOAD32L(rk[2], key + 8);
+   LOAD32L(rk[3], key + 12);
+   if (keylen == 16) {
+      temp = temp_load(key);
+      for (;;) {
+         rk[4] = rk[0] ^ aesni_setup_mix(temp, 3) ^ rcon[i];
+         rk[5] = rk[1] ^ rk[4];
+         rk[6] = rk[2] ^ rk[5];
+         rk[7] = rk[3] ^ rk[6];
+         if (++i == 10) {
+            break;
+         }
+         temp = temp_update(temp, rk[7]);
+         rk += 4;
+      }
+   } else if (keylen == 24) {
+      LOAD32L(rk[4], key + 16);
+      LOAD32L(rk[5], key + 20);
+      temp = temp_load(key + 8);
+      for (;;) {
+         rk[6] = rk[0] ^ aesni_setup_mix(temp, 3) ^ rcon[i];
+         rk[7] = rk[1] ^ rk[6];
+         rk[8] = rk[2] ^ rk[7];
+         rk[9] = rk[3] ^ rk[8];
+         if (++i == 8) {
+            break;
+         }
+         rk[10] = rk[4] ^ rk[9];
+         rk[11] = rk[5] ^ rk[10];
+         temp = temp_update(temp, rk[11]);
+         rk += 6;
+      }
+   } else if (keylen == 32) {
+      LOAD32L(rk[4], key + 16);
+      LOAD32L(rk[5], key + 20);
+      LOAD32L(rk[6], key + 24);
+      LOAD32L(rk[7], key + 28);
+      temp = temp_load(key + 16);
+      for (;;) {
+         rk[8] = rk[0] ^ aesni_setup_mix(temp, 3) ^ rcon[i];
+         rk[9] = rk[1] ^ rk[8];
+         rk[10] = rk[2] ^ rk[9];
+         rk[11] = rk[3] ^ rk[10];
+         if (++i == 7) {
+            break;
+         }
+         temp = temp_update(temp, rk[11]);
+         rk[12] = rk[4] ^ aesni_setup_mix(temp, 2);
+         rk[13] = rk[5] ^ rk[12];
+         rk[14] = rk[6] ^ rk[13];
+         rk[15] = rk[7] ^ rk[14];
+         temp = temp_update(temp, rk[15]);
+         rk += 8;
+      }
+   } else {
+      /* this can't happen */
+      /* coverity[dead_error_line] */
+      return CRYPT_ERROR;
+   }
+
+   /* setup the inverse key now */
+   rk = skey->rijndael.dK;
+   rrk = skey->rijndael.eK + skey->rijndael.Nr * 4;
+
+   /* apply the inverse MixColumn transform to all round keys but the first and the last: */
+   /* copy first */
+   *rk++ = *rrk++;
+   *rk++ = *rrk++;
+   *rk++ = *rrk++;
+   *rk = *rrk;
+   rk -= 3;
+   rrk -= 3;
+
+   for (i = 1; i < skey->rijndael.Nr; i++) {
+      rrk -= 4;
+      rk += 4;
+      *((__m128i*) rk) = temp_invert(rrk);
+   }
+
+   /* copy last */
+   rrk -= 4;
+   rk += 4;
+   *rk++ = *rrk++;
+   *rk++ = *rrk++;
+   *rk++ = *rrk++;
+   *rk = *rrk;
+
+   return CRYPT_OK;
+}
+
+/**
+  Encrypts a block of text with AES
+  @param pt The input plaintext (16 bytes)
+  @param ct The output ciphertext (16 bytes)
+  @param skey The key as scheduled
+  @return CRYPT_OK if successful
+*/
+LTC_ATTRIBUTE((__target__("aes")))
+#ifdef LTC_CLEAN_STACK
+static int s_aesni_ecb_encrypt(const unsigned char *pt, unsigned char *ct, const symmetric_key *skey)
+#else
+int aesni_ecb_encrypt(const unsigned char *pt, unsigned char *ct, const symmetric_key *skey)
+#endif
+{
+   int Nr, r;
+   const __m128i *skeys;
+   __m128i block;
+
+   LTC_ARGCHK(pt != NULL);
+   LTC_ARGCHK(ct != NULL);
+   LTC_ARGCHK(skey != NULL);
+
+   Nr = skey->rijndael.Nr;
+
+   if (Nr < 2 || Nr > 16) return CRYPT_INVALID_ROUNDS;
+
+   skeys = (__m128i*) skey->rijndael.eK;
+   block = _mm_loadu_si128((const __m128i*) (pt));
+
+   block = _mm_xor_si128(block, skeys[0]);
+   for (r = 1; r < Nr - 1; r += 2) {
+      block = _mm_aesenc_si128(block, skeys[r]);
+      block = _mm_aesenc_si128(block, skeys[r + 1]);
+   }
+   block = _mm_aesenc_si128(block, skeys[Nr - 1]);
+   block = _mm_aesenclast_si128(block, skeys[Nr]);
+
+   _mm_storeu_si128((__m128i*) ct, block);
+
+   return CRYPT_OK;
+}
+
+#ifdef LTC_CLEAN_STACK
+int aesni_ecb_encrypt(const unsigned char *pt, unsigned char *ct, const symmetric_key *skey)
+{
+   int err = s_aesni_ecb_encrypt(pt, ct, skey);
+   burn_stack(sizeof(unsigned long)*8 + sizeof(unsigned long*) + sizeof(int)*2);
+   return err;
+}
+#endif
+
+
+/**
+  Decrypts a block of text with AES
+  @param ct The input ciphertext (16 bytes)
+  @param pt The output plaintext (16 bytes)
+  @param skey The key as scheduled
+  @return CRYPT_OK if successful
+*/
+LTC_ATTRIBUTE((__target__("aes")))
+#ifdef LTC_CLEAN_STACK
+static int s_aesni_ecb_decrypt(const unsigned char *ct, unsigned char *pt, const symmetric_key *skey)
+#else
+int aesni_ecb_decrypt(const unsigned char *ct, unsigned char *pt, const symmetric_key *skey)
+#endif
+{
+   int Nr, r;
+   const __m128i *skeys;
+   __m128i block;
+
+   LTC_ARGCHK(pt != NULL);
+   LTC_ARGCHK(ct != NULL);
+   LTC_ARGCHK(skey != NULL);
+
+   Nr = skey->rijndael.Nr;
+
+   if (Nr < 2 || Nr > 16) return CRYPT_INVALID_ROUNDS;
+
+   skeys = (__m128i*) skey->rijndael.dK;
+   block = _mm_loadu_si128((const __m128i*) (ct));
+
+   block = _mm_xor_si128(block, skeys[0]);
+   for (r = 1; r < Nr - 1; r += 2) {
+      block = _mm_aesdec_si128(block, skeys[r]);
+      block = _mm_aesdec_si128(block, skeys[r + 1]);
+   }
+   block = _mm_aesdec_si128(block, skeys[Nr - 1]);
+   block = _mm_aesdeclast_si128(block, skeys[Nr]);
+
+   _mm_storeu_si128((__m128i*) pt, block);
+
+   return CRYPT_OK;
+}
+
+
+#ifdef LTC_CLEAN_STACK
+int aesni_ecb_decrypt(const unsigned char *ct, unsigned char *pt, const symmetric_key *skey)
+{
+   int err = s_aesni_ecb_decrypt(ct, pt, skey);
+   burn_stack(sizeof(unsigned long)*8 + sizeof(unsigned long*) + sizeof(int)*2);
+   return err;
+}
+#endif
+
+/**
+  Performs a self-test of the AES block cipher
+  @return CRYPT_OK if functional, CRYPT_NOP if self-test has been disabled
+*/
+int aesni_test(void)
+{
+ #ifndef LTC_TEST
+    return CRYPT_NOP;
+ #else
+ int err;
+ static const struct {
+     int keylen;
+     unsigned char key[32], pt[16], ct[16];
+ } tests[] = {
+    { 16,
+      { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f },
+      { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff },
+      { 0x69, 0xc4, 0xe0, 0xd8, 0x6a, 0x7b, 0x04, 0x30,
+        0xd8, 0xcd, 0xb7, 0x80, 0x70, 0xb4, 0xc5, 0x5a }
+    }, {
+      24,
+      { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17 },
+      { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff },
+      { 0xdd, 0xa9, 0x7c, 0xa4, 0x86, 0x4c, 0xdf, 0xe0,
+        0x6e, 0xaf, 0x70, 0xa0, 0xec, 0x0d, 0x71, 0x91 }
+    }, {
+      32,
+      { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f },
+      { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff },
+      { 0x8e, 0xa2, 0xb7, 0xca, 0x51, 0x67, 0x45, 0xbf,
+        0xea, 0xfc, 0x49, 0x90, 0x4b, 0x49, 0x60, 0x89 }
+    }
+ };
+
+  symmetric_key key;
+  unsigned char tmp[2][16];
+  int i, y;
+
+  for (i = 0; i < (int)LTC_ARRAY_SIZE(tests); i++) {
+    zeromem(&key, sizeof(key));
+    if ((err = aesni_setup(tests[i].key, tests[i].keylen, 0, &key)) != CRYPT_OK) {
+       return err;
     }
 
-    return (c & what) != 0;
-}
-
-/*
- * Binutils needs to be at least 2.19 to support AES-NI instructions.
- * Unfortunately, a lot of users have a lower version now (2014-04).
- * Emit bytecode directly in order to support "old" version of gas.
- *
- * Opcodes from the Intel architecture reference manual, vol. 3.
- * We always use registers, so we don't need prefixes for memory operands.
- * Operand macros are in gas order (src, dst) as opposed to Intel order
- * (dst, src) in order to blend better into the surrounding assembly code.
- */
-#define AESDEC(regs)      ".byte 0x66,0x0F,0x38,0xDE," regs "\n\t"
-#define AESDECLAST(regs)  ".byte 0x66,0x0F,0x38,0xDF," regs "\n\t"
-#define AESENC(regs)      ".byte 0x66,0x0F,0x38,0xDC," regs "\n\t"
-#define AESENCLAST(regs)  ".byte 0x66,0x0F,0x38,0xDD," regs "\n\t"
-#define AESIMC(regs)      ".byte 0x66,0x0F,0x38,0xDB," regs "\n\t"
-#define AESKEYGENA(regs, imm)  ".byte 0x66,0x0F,0x3A,0xDF," regs "," imm "\n\t"
-#define PCLMULQDQ(regs, imm)   ".byte 0x66,0x0F,0x3A,0x44," regs "," imm "\n\t"
-
-#define xmm0_xmm0   "0xC0"
-#define xmm0_xmm1   "0xC8"
-#define xmm0_xmm2   "0xD0"
-#define xmm0_xmm3   "0xD8"
-#define xmm0_xmm4   "0xE0"
-#define xmm1_xmm0   "0xC1"
-#define xmm1_xmm2   "0xD1"
-
-/*
- * AES-NI AES-ECB block en(de)cryption
- */
-int mbedtls_aesni_crypt_ecb(mbedtls_aes_context *ctx, int mode, const unsigned char input[16], unsigned char output[16])
-{
-    asm ("movdqu    (%3), %%xmm0    \n\t" // load input
-         "movdqu    (%1), %%xmm1    \n\t" // load round key 0
-         "pxor      %%xmm1, %%xmm0  \n\t" // round 0
-         "add       $16, %1         \n\t" // point to next round key
-         "subl      $1, %0          \n\t" // normal rounds = nr - 1
-         "test      %2, %2          \n\t" // mode?
-         "jz        2f              \n\t" // 0 = decrypt
-
-         "1:                        \n\t" // encryption loop
-         "movdqu    (%1), %%xmm1    \n\t" // load round key
-         AESENC(xmm1_xmm0)                // do round
-         "add       $16, %1         \n\t" // point to next round key
-         "subl      $1, %0          \n\t" // loop
-         "jnz       1b              \n\t"
-         "movdqu    (%1), %%xmm1    \n\t" // load round key
-         AESENCLAST(xmm1_xmm0)            // last round
-         "jmp       3f              \n\t"
-
-         "2:                        \n\t" // decryption loop
-         "movdqu    (%1), %%xmm1    \n\t"
-         AESDEC(xmm1_xmm0)                // do round
-         "add       $16, %1         \n\t"
-         "subl      $1, %0          \n\t"
-         "jnz       2b              \n\t"
-         "movdqu    (%1), %%xmm1    \n\t" // load round key
-         AESDECLAST(xmm1_xmm0)            // last round
-
-         "3:                        \n\t"
-         "movdqu    %%xmm0, (%4)    \n\t" // export output
-         :
-         : "r" (ctx->nr), "r" (ctx->buf + ctx->rk_offset), "r" (mode), "r" (input), "r" (output)
-         : "memory", "cc", "xmm0", "xmm1");
-
-
-    return 0;
-}
-
-/*
- * Compute decryption round keys from encryption round keys
- */
-void mbedtls_aesni_inverse_key(unsigned char *invkey, const unsigned char *fwdkey, int nr)
-{
-    unsigned char *ik = invkey;
-    const unsigned char *fk = fwdkey + 16 * nr;
-
-    memcpy(ik, fk, 16);
-
-    for (fk -= 16, ik += 16; fk > fwdkey; fk -= 16, ik += 16) {
-        asm ("movdqu (%0), %%xmm0       \n\t"
-             AESIMC(xmm0_xmm0)
-             "movdqu %%xmm0, (%1)       \n\t"
-             :
-             : "r" (fk), "r" (ik)
-             : "memory", "xmm0");
+    aesni_ecb_encrypt(tests[i].pt, tmp[0], &key);
+    aesni_ecb_decrypt(tmp[0], tmp[1], &key);
+    if (ltc_compare_testvector(tmp[0], 16, tests[i].ct, 16, "AES-NI Encrypt", i) ||
+          ltc_compare_testvector(tmp[1], 16, tests[i].pt, 16, "AES-NI Decrypt", i)) {
+        return CRYPT_FAIL_TESTVECTOR;
     }
 
-    memcpy(ik, fk, 16);
+    /* now see if we can encrypt all zero bytes 1000 times, decrypt and come back where we started */
+    for (y = 0; y < 16; y++) tmp[0][y] = 0;
+    for (y = 0; y < 1000; y++) aesni_ecb_encrypt(tmp[0], tmp[0], &key);
+    for (y = 0; y < 1000; y++) aesni_ecb_decrypt(tmp[0], tmp[0], &key);
+    for (y = 0; y < 16; y++) if (tmp[0][y] != 0) return CRYPT_FAIL_TESTVECTOR;
+  }
+  return CRYPT_OK;
+ #endif
 }
 
-/*
- * Key expansion, 128-bit case
- */
-static void aesni_setkey_enc_128(unsigned char *rk, const unsigned char *key)
+
+/** Terminate the context
+   @param skey    The scheduled key
+*/
+void aesni_done(symmetric_key *skey)
 {
-    asm ("movdqu (%1), %%xmm0               \n\t" // copy the original key
-         "movdqu %%xmm0, (%0)               \n\t" // as round key 0
-         "jmp 2f                            \n\t" // skip auxiliary routine
-
-         /*
-          * Finish generating the next round key.
-          *
-          * On entry xmm0 is r3:r2:r1:r0 and xmm1 is X:stuff:stuff:stuff
-          * with X = rot( sub( r3 ) ) ^ RCON.
-          *
-          * On exit, xmm0 is r7:r6:r5:r4
-          * with r4 = X + r0, r5 = r4 + r1, r6 = r5 + r2, r7 = r6 + r3
-          * and those are written to the round key buffer.
-          */
-         "1:                                \n\t"
-         "pshufd $0xff, %%xmm1, %%xmm1      \n\t" // X:X:X:X
-         "pxor %%xmm0, %%xmm1               \n\t" // X+r3:X+r2:X+r1:r4
-         "pslldq $4, %%xmm0                 \n\t" // r2:r1:r0:0
-         "pxor %%xmm0, %%xmm1               \n\t" // X+r3+r2:X+r2+r1:r5:r4
-         "pslldq $4, %%xmm0                 \n\t" // etc
-         "pxor %%xmm0, %%xmm1               \n\t"
-         "pslldq $4, %%xmm0                 \n\t"
-         "pxor %%xmm1, %%xmm0               \n\t" // update xmm0 for next time!
-         "add $16, %0                       \n\t" // point to next round key
-         "movdqu %%xmm0, (%0)               \n\t" // write it
-         "ret                               \n\t"
-
-         /* Main "loop" */
-         "2:                                \n\t"
-         AESKEYGENA(xmm0_xmm1, "0x01")      "call 1b \n\t"
-         AESKEYGENA(xmm0_xmm1, "0x02")      "call 1b \n\t"
-         AESKEYGENA(xmm0_xmm1, "0x04")      "call 1b \n\t"
-         AESKEYGENA(xmm0_xmm1, "0x08")      "call 1b \n\t"
-         AESKEYGENA(xmm0_xmm1, "0x10")      "call 1b \n\t"
-         AESKEYGENA(xmm0_xmm1, "0x20")      "call 1b \n\t"
-         AESKEYGENA(xmm0_xmm1, "0x40")      "call 1b \n\t"
-         AESKEYGENA(xmm0_xmm1, "0x80")      "call 1b \n\t"
-         AESKEYGENA(xmm0_xmm1, "0x1B")      "call 1b \n\t"
-         AESKEYGENA(xmm0_xmm1, "0x36")      "call 1b \n\t"
-         :
-         : "r" (rk), "r" (key)
-         : "memory", "cc", "0");
+  LTC_UNUSED_PARAM(skey);
 }
 
-/*
- * Key expansion, 192-bit case
- */
-static void aesni_setkey_enc_192(unsigned char *rk, const unsigned char *key)
+
+/**
+  Gets suitable key size
+  @param keysize [in/out] The length of the recommended key (in bytes).  This function will store the suitable size back in this variable.
+  @return CRYPT_OK if the input key size is acceptable.
+*/
+int aesni_keysize(int *keysize)
 {
-    asm ("movdqu (%1), %%xmm0   \n\t" // copy original round key
-         "movdqu %%xmm0, (%0)   \n\t"
-         "add $16, %0           \n\t"
-         "movq 16(%1), %%xmm1   \n\t"
-         "movq %%xmm1, (%0)     \n\t"
-         "add $8, %0            \n\t"
-         "jmp 2f                \n\t" // skip auxiliary routine
+   LTC_ARGCHK(keysize != NULL);
 
-         /*
-          * Finish generating the next 6 quarter-keys.
-          *
-          * On entry xmm0 is r3:r2:r1:r0, xmm1 is stuff:stuff:r5:r4
-          * and xmm2 is stuff:stuff:X:stuff with X = rot( sub( r3 ) ) ^ RCON.
-          *
-          * On exit, xmm0 is r9:r8:r7:r6 and xmm1 is stuff:stuff:r11:r10
-          * and those are written to the round key buffer.
-          */
-         "1:                            \n\t"
-         "pshufd $0x55, %%xmm2, %%xmm2  \n\t" // X:X:X:X
-         "pxor %%xmm0, %%xmm2           \n\t" // X+r3:X+r2:X+r1:r4
-         "pslldq $4, %%xmm0             \n\t" // etc
-         "pxor %%xmm0, %%xmm2           \n\t"
-         "pslldq $4, %%xmm0             \n\t"
-         "pxor %%xmm0, %%xmm2           \n\t"
-         "pslldq $4, %%xmm0             \n\t"
-         "pxor %%xmm2, %%xmm0           \n\t" // update xmm0 = r9:r8:r7:r6
-         "movdqu %%xmm0, (%0)           \n\t"
-         "add $16, %0                   \n\t"
-         "pshufd $0xff, %%xmm0, %%xmm2  \n\t" // r9:r9:r9:r9
-         "pxor %%xmm1, %%xmm2           \n\t" // stuff:stuff:r9+r5:r10
-         "pslldq $4, %%xmm1             \n\t" // r2:r1:r0:0
-         "pxor %%xmm2, %%xmm1           \n\t" // xmm1 = stuff:stuff:r11:r10
-         "movq %%xmm1, (%0)             \n\t"
-         "add $8, %0                    \n\t"
-         "ret                           \n\t"
-
-         "2:                            \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x01")  "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x02")  "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x04")  "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x08")  "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x10")  "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x20")  "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x40")  "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x80")  "call 1b \n\t"
-
-         :
-         : "r" (rk), "r" (key)
-         : "memory", "cc", "0");
+   if (*keysize < 16) {
+      return CRYPT_INVALID_KEYSIZE;
+   }
+   if (*keysize < 24) {
+      *keysize = 16;
+      return CRYPT_OK;
+   }
+   if (*keysize < 32) {
+      *keysize = 24;
+      return CRYPT_OK;
+   }
+   *keysize = 32;
+   return CRYPT_OK;
 }
 
-/*
- * Key expansion, 256-bit case
- */
-static void aesni_setkey_enc_256(unsigned char *rk, const unsigned char *key)
-{
-    asm ("movdqu (%1), %%xmm0           \n\t"
-         "movdqu %%xmm0, (%0)           \n\t"
-         "add $16, %0                   \n\t"
-         "movdqu 16(%1), %%xmm1         \n\t"
-         "movdqu %%xmm1, (%0)           \n\t"
-         "jmp 2f                        \n\t" // skip auxiliary routine
+#undef aesni_setup_mix
+#undef temp_load
+#undef temp_update
+#undef temp_invert
+#undef rcon
 
-         /*
-          * Finish generating the next two round keys.
-          *
-          * On entry xmm0 is r3:r2:r1:r0, xmm1 is r7:r6:r5:r4 and
-          * xmm2 is X:stuff:stuff:stuff with X = rot( sub( r7 )) ^ RCON
-          *
-          * On exit, xmm0 is r11:r10:r9:r8 and xmm1 is r15:r14:r13:r12
-          * and those have been written to the output buffer.
-          */
-         "1:                                \n\t"
-         "pshufd $0xff, %%xmm2, %%xmm2      \n\t"
-         "pxor %%xmm0, %%xmm2               \n\t"
-         "pslldq $4, %%xmm0                 \n\t"
-         "pxor %%xmm0, %%xmm2               \n\t"
-         "pslldq $4, %%xmm0                 \n\t"
-         "pxor %%xmm0, %%xmm2               \n\t"
-         "pslldq $4, %%xmm0                 \n\t"
-         "pxor %%xmm2, %%xmm0               \n\t"
-         "add $16, %0                       \n\t"
-         "movdqu %%xmm0, (%0)               \n\t"
+#endif
 
-         /* Set xmm2 to stuff:Y:stuff:stuff with Y = subword( r11 )
-          * and proceed to generate next round key from there */
-         AESKEYGENA(xmm0_xmm2, "0x00")
-         "pshufd $0xaa, %%xmm2, %%xmm2      \n\t"
-         "pxor %%xmm1, %%xmm2               \n\t"
-         "pslldq $4, %%xmm1                 \n\t"
-         "pxor %%xmm1, %%xmm2               \n\t"
-         "pslldq $4, %%xmm1                 \n\t"
-         "pxor %%xmm1, %%xmm2               \n\t"
-         "pslldq $4, %%xmm1                 \n\t"
-         "pxor %%xmm2, %%xmm1               \n\t"
-         "add $16, %0                       \n\t"
-         "movdqu %%xmm1, (%0)               \n\t"
-         "ret                               \n\t"
-
-         /*
-          * Main "loop" - Generating one more key than necessary,
-          * see definition of mbedtls_aes_context.buf
-          */
-         "2:                                \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x01")      "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x02")      "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x04")      "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x08")      "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x10")      "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x20")      "call 1b \n\t"
-         AESKEYGENA(xmm1_xmm2, "0x40")      "call 1b \n\t"
-         :
-         : "r" (rk), "r" (key)
-         : "memory", "cc", "0");
-}
-
-/*
- * Key expansion, wrapper
- */
-int mbedtls_aesni_setkey_enc(unsigned char *rk, const unsigned char *key, size_t bits)
-{
-    switch (bits) {
-        case 128: aesni_setkey_enc_128(rk, key); break;
-        case 192: aesni_setkey_enc_192(rk, key); break;
-        case 256: aesni_setkey_enc_256(rk, key); break;
-        default: return MBEDTLS_ERR_AES_INVALID_KEY_LENGTH;
-    }
-
-    return 0;
-}
-
-#endif /* MBEDTLS_AESNI_HAVE_CODE */
-
-#endif /* MBEDTLS_AESNI_C */

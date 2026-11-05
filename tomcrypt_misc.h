@@ -53,6 +53,32 @@ int base16_decode(const          char *in,  unsigned long  inlen,
                         unsigned char *out, unsigned long *outlen);
 #endif
 
+/* ---- Argon2 password hashing function (RFC 9106) ---- */
+#ifdef LTC_ARGON2
+typedef enum argon2_type {
+   ARGON2_D  = 0,
+   ARGON2_I  = 1,
+   ARGON2_ID = 2
+} argon2_type;
+
+int argon2_hash(const unsigned char *pwd,  unsigned long pwdlen,
+                const unsigned char *salt, unsigned long saltlen,
+                const unsigned char *secret, unsigned long secretlen,
+                const unsigned char *ad, unsigned long adlen,
+                unsigned int t_cost, unsigned int m_cost,
+                unsigned int parallelism,
+                argon2_type type,
+                unsigned char *out, unsigned long outlen);
+#endif /* LTC_ARGON2 */
+
+/* ---- scrypt password-based KDF (RFC 7914) ---- */
+#ifdef LTC_SCRYPT
+int scrypt_pbkdf(const unsigned char *password, unsigned long password_len,
+                 const unsigned char *salt,     unsigned long salt_len,
+                 unsigned long N, unsigned long r, unsigned long p,
+                 unsigned char *out, unsigned long outlen);
+#endif /* LTC_SCRYPT */
+
 #ifdef LTC_BCRYPT
 int bcrypt_pbkdf_openbsd(const          void *secret, unsigned long secret_len,
                          const unsigned char *salt,   unsigned long salt_len,
